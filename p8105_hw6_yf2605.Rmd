@@ -6,6 +6,8 @@ output: github_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(viridis)
+library(mgcv)
+library(modelr)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
@@ -31,8 +33,10 @@ theme_set(
 ```
 
 ## Problem 1
-For this problem, we’ll use the 2017 Central Park weather data that we’ve seen elsewhere. The code chunk below (adapted from the course website) will download these data.
 
+Download data
+
+```{r}
 weather_df = 
   rnoaa::meteo_pull_monitors(
     c("USW00094728"),
@@ -44,11 +48,94 @@ weather_df =
     tmin = tmin / 10,
     tmax = tmax / 10) %>%
   select(name, id, everything())
-The boostrap is helpful when you’d like to perform inference for a parameter / value / summary that doesn’t have an easy-to-write-down distribution in the usual repeated sampling framework. We’ll focus on a simple linear regression with tmax as the response and tmin as the predictor, and are interested in the distribution of two quantities estimated from these data:
+```
 
-r^2
-log(β^0∗β^1)
-Use 5000 bootstrap samples and, for each bootstrap sample, produce estimates of these two quantities. Plot the distribution of your estimates, and describe these in words. Using the 5000 bootstrap estimates, identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r^2 and log(β^0∗β^1). Note: broom::glance() is helpful for extracting r^2 from a fitted regression, and broom::tidy() (with some additional wrangling) should help in computing log(β^0∗β^1).
+Function calculates log beta0 * beta1
+
+```{r}
+log_betas_fuc = function(model){
+  
+  estimate_df = 
+    broom::tidy(model) %>% 
+    select(term, estimate) %>% 
+    pivot_wider(
+      names_from = term,
+      values_from = estimate
+    ) %>% 
+    janitor::clean_names() %>% 
+    mutate(log_betas = log(intercept*tmin))
+
+  estimate_df[["log_betas"]]
+}
+```
+
+Function gets r squared
+
+```{r}
+r_squared_fuc = function(model){
+  
+  r_squared_df = 
+    broom::glance(model) %>% 
+    janitor::clean_names()
+
+  r_squared_df[["r_squared"]]
+}
+```
+
+Generate data frame for plot
+
+```{r}
+models_df =   
+  weather_df %>% 
+  bootstrap(n = 5000) %>% 
+  mutate(
+    model = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    log_betas = as.numeric(map(model, log_betas_fuc)),
+    r_squared = as.numeric(map(model, r_squared_fuc))
+  ) %>% 
+  select(log_betas, r_squared)
+```
+
+### Distribution of log (beta0 * beta1)
+
+```{r}
+models_df %>% 
+  ggplot(aes(x = log_betas)) +
+  geom_density() +
+  labs(
+    title = "Distribution of log (beta0 * beta1)",
+    x = "log beta0 * beta1",
+  )
+```
+
+The distribution of log (beta0 * beta1) is approximately normal with mean about 2.01.
+
+
+### Distribution of r-squared
+
+```{r}
+models_df %>% 
+  ggplot(aes(x = r_squared)) +
+  geom_density() +
+  labs(
+    title = "Distribution of r-squared",
+    x = "r-squared",
+  )
+```
+
+The distribution of r-squared is approximately normal with mean about 0.912.
+
+### 95% confidence interval
+
+```{r}
+log_betas_ci = quantile(models_df[["log_betas"]], probs = c(0.025, 0.975))
+
+r_squared_ci = quantile(models_df[["r_squared"]], probs = c(0.025, 0.975))
+```
+
+The 95% CI for log (beta0 * beta1) is (`r log_betas_ci`)
+
+The 95% CI for r-squared is (`r r_squared_ci`)
 
 ## Problem 2
 The Washington Post has gathered data on homicides in 50 large U.S. cities and made the data available through a GitHub repository here. You can read their accompanying article here.
